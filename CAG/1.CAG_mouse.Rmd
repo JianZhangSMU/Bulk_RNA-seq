@@ -1,0 +1,154 @@
+---
+title: "CAG low and high for human and mouse bulk RNA-seq analysis"
+author: "Jian Zhang (zhang.jian@yale.edu)"
+date: "`r format(Sys.Date())`"
+output: 
+  html_notebook: 
+    code_folding: hide
+  github_document: default
+---
+Experiment (12 samples.):
+13_1, 13_2, 13_3  Mouse
+14_1, 14_2, 14_3  Mouse
+15_1, 15_2, 15_3  Human
+16_1, 16_2, 16_3  Human
+
+```{r global_options, warning=FALSE, message=FALSE}
+library(ggplot2)
+library(pheatmap)
+library(tidyverse)
+library(dplyr)
+library(org.Mm.eg.db)
+library(org.Hs.eg.db)
+library(GO.db)
+library(clusterProfiler)
+library(enrichplot)
+library(fgsea)
+library(DOSE)
+```
+
+# For mouse
+Using *Tophat2* and *Cuffdiff* to do reads mapping, gene quantification and DEGs identification. Run the scripts and pepline in Yale linux server (`/home/zj76/project/Qiao_12_samples_CAG/6_mouse_samples`):
+
+`perl 1.run.tophat2.parallel.pl /home/zj76/project/Qiao_12_samples_CAG/6_mouse_samples/Sample_13_1_to_Sample_14_3`
+
+`perl 2.run.cuffdiff.with.slurm.pl /home/zj76/project/database/mm10/Mus_musculus.GRCm38.96.gtf mouse_13,mouse_14`
+
+`sbatch cuffdiff.sh.run.slurm.sh`
+
+`perl 3.mapping.sta.pl`
+
+`perl 4.HTSeq.counts.table.pl`;`perl 4.FPKM.table.from.cuffnorm.pl`
+
+`perl 5.FPKM.fiter.pl`
+
+`perl 6.FPKM.sta.pl gene.FPKM.filtered.table`
+
+`perl 7.DEGs.from.cuffdiff.pl`
+
+## Mapping statistics
+```{r}
+mapping = read.table("6_mouse_samples/mapping.sta.table",header=T)
+mapping
+```
+## Samples correlation
+```{r}
+fpkm = read.table("6_mouse_samples/gene.FPKM.filtered.table", header=T, row.names = 1)
+#fpkm = read_table("6_mouse_samples/gene.FPKM.filtered.table")
+b=cor(fpkm,method="kendall") #method = c("pearson", "kendall", "spearman")
+pheatmap(b)
+```
+## Genes correlation
+```{r}
+pheatmap(log10(fpkm+1),
+         cluster_rows=T,
+         cluster_cols=F,
+         show_rownames=F,
+         show_colnames=T,
+         fontsize_row=1,
+         fontsize_col=10)
+```
+## Differential expressed genes (DEGs)
+```{r}
+all_genes = read.table("6_mouse_samples/DEGs/mouse_13.VS.mouse_14.all.table", header=T, row.names = 1)
+degs = read.table("6_mouse_samples/DEGs/mouse_13.VS.mouse_14.DEGs.table", header=T, row.names = 1)
+head(degs)
+```
+```{r}
+normal=read.table("6_mouse_samples/DEGs/mouse_13.VS.mouse_14.normal.for.plot",header=T)
+up=read.table("6_mouse_samples/DEGs/mouse_13.VS.mouse_14.Up.for.plot",header=T)
+down=read.table("6_mouse_samples/DEGs/mouse_13.VS.mouse_14.Down.for.plot",header=T)
+plot(normal,type="p",pch=20,col="gray",xlab="Fold change [log2(mouse_14/mouse_13)]",ylab="-Log10(FDR)",xlim=c(-5,5),ylim=c(0,4))
+points(up,pch=20,col="red")
+points(down,pch=20,col="blue")
+abline(h=-log10(0.05),col="green")
+abline(v=-1,col="green")
+abline(v=1,col="green")
+```
+## GO enrichment
+```{r warning=FALSE, message = FALSE}
+#sapply(degs,mode)
+degs_ensemble_id = as.character(degs$gene_id)
+degs_gene_name = as.character(degs$gene)
+degs_enrich_go_bp = enrichGO(gene=degs_gene_name,
+                             OrgDb="org.Mm.eg.db",
+                             keyType = "SYMBOL",
+                             ont = "BP",
+                             pvalueCutoff  = 0.01,
+                             pAdjustMethod = "BH",
+                             qvalueCutoff = 0.05,
+                             minGSSize = 5, 
+                             maxGSSize = 2000)
+dotplot(degs_enrich_go_bp, title="GO (BP) enrichment for DEGs",showCategory=10)
+```
+```{r warning=FALSE, message = FALSE, fig.width=10, fig.height=6}
+# GO enrichment for DEGs
+formula_res <- compareCluster(
+  gene~regulation,
+  data=degs,
+  fun="enrichGO",
+  OrgDb="org.Mm.eg.db",
+  keyType = "SYMBOL",
+  ont		   = "BP",
+  pAdjustMethod = "BH",
+  pvalueCutoff  = 0.01,
+  qvalueCutoff  = 0.05
+)
+# Run GO enrichment test and merge terms that are close to each other to remove result redundancy
+lineage1_ego <- simplify(
+  formula_res,
+  cutoff=0.5,
+  by="p.adjust",
+  select_fun=min
+)
+# Plot both analysis results
+dotplot(lineage1_ego, title="GO (BP) enrichment for up and down-regulated DEGs", showCategory=6)
+```
+
+## KEGG enrichment
+```{r}
+# #Convert Gene Symbols to Entrez IDs in R
+# # Run columns(org.Hs.eg.db) to see available identifiers that can be used in this package. There are actually a lot of things such as Ensembl IDs, Uniprot IDs, protein families and GO annotations:
+# columns(org.Mm.eg.db)
+# columns(org.Hs.eg.db)
+# # Let’s make a sample gene symbol list to work with and do the conversion using mapIds which required 4 arguments, the first is the object itself, the second is the list of identifiers (symbols in this case), the third is the identifier type we want to convert to, and the last is the type of identifier for the second argument:
+# symbols <- c('AHNAK', 'BOD1L1', 'HSPB1', 'SMARCA4', 'TRIM28')
+# mapIds(org.Hs.eg.db, symbols, 'ENTREZID', 'SYMBOL')
+```
+
+```{r warning=FALSE, message = FALSE}
+degs_gene_SYMBOL_to_UNIPROT = mapIds(org.Mm.eg.db, degs_gene_name, 'UNIPROT', 'SYMBOL')
+# degs_gene_SYMBOL_to_UNIPROT = select(org.Mm.eg.db,
+#                                      keys = degs_gene_name,
+#                                      columns = c("UNIPROT","SYMBOL"),
+#                                      keytype = "SYMBOL")
+p <- enrichKEGG(unname(degs_gene_SYMBOL_to_UNIPROT),
+           organism = "mmu",
+           keyType = "uniprot",
+           pvalueCutoff  = 0.01,
+           pAdjustMethod = "BH",
+           qvalueCutoff = 0.05,
+           minGSSize = 5,
+           maxGSSize = 2000)#universe=all.genes,use_internal_data=F
+dotplot(p, title="KEGG enrichment for DEGs",showCategory=10)
+```

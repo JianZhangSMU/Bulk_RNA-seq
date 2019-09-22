@@ -7,19 +7,6 @@ output:
     code_folding: hide
   github_document: default
 ---
-```{r global_options, warning=FALSE, message=FALSE}
-library(ggplot2)
-library(pheatmap)
-library(tidyverse)
-library(dplyr)
-library(org.Mm.eg.db)
-library(org.Hs.eg.db)
-library(GO.db)
-library(clusterProfiler)
-library(enrichplot)
-library(fgsea)
-library(DOSE)
-```
 
 # For human
 Run the same scripts and pepline with mouse in Yale linux server (`/home/zj76/project/Qiao_12_samples_CAG/6_human_samples`):
@@ -40,15 +27,35 @@ Run the same scripts and pepline with mouse in Yale linux server (`/home/zj76/pr
 
 `perl 7.DEGs.from.cuffdiff.pl`
 
+```{r global_options, warning=FALSE, message=FALSE}
+library(ggplot2)
+library(pheatmap)
+library(tidyverse)
+library(dplyr)
+library(org.Mm.eg.db)
+library(org.Hs.eg.db)
+library(GO.db)
+library(clusterProfiler)
+library(enrichplot)
+library(fgsea)
+library(DOSE)
+library(RcisTarget)
+library(DT)
+library(reshape2)
+library(visNetwork)
+```
+
 ## Mapping statistics
 ```{r}
-mapping = read.table("6_human_samples/mapping.sta.table",header=T)
+mapping = read.table("6_human_samples/mapping.sta.table",header=T, row.names = 1)
+row.names(mapping) = c("human_CAG_low_15_1","human_CAG_low_15_2","human_CAG_low_15_3","human_CAG_hi_16_1","human_CAG_hi_16_2","human_CAG_hi_16_3")
 mapping
 ```
 
 ## Samples correlation
 ```{r}
 fpkm = read.table("6_human_samples/gene.FPKM.filtered.table", header=T, row.names = 1)
+colnames(fpkm) = c("human_CAG_low_15_1","human_CAG_low_15_2","human_CAG_low_15_3","human_CAG_hi_16_1","human_CAG_hi_16_2","human_CAG_hi_16_3")
 b=cor(fpkm,method="kendall") #method = c("pearson", "kendall", "spearman")
 pheatmap(b)
 ```
@@ -66,13 +73,18 @@ pheatmap(log10(fpkm+1),
 ```{r}
 all_genes = read.table("6_human_samples/DEGs/human_15.VS.human_16.all.table", header=T, row.names = 1)
 degs = read.table("6_human_samples/DEGs/human_15.VS.human_16.DEGs.table", header=T, row.names = 1)
-head(degs)
+datatable(degs,filter="top")
 ```
 ```{r}
+barplot(table(degs$regulation),col=c("blue","red"))
+```
+
+#### There are 144 up-regulated and 41 down-regulated genes in samples of human_CAG_hi compared to human_CAG_low
+```{r fig.width=7, fig.height=7}
 normal=read.table("6_human_samples/DEGs/human_15.VS.human_16.normal.for.plot",header=T)
 up=read.table("6_human_samples/DEGs/human_15.VS.human_16.Up.for.plot",header=T)
 down=read.table("6_human_samples/DEGs/human_15.VS.human_16.Down.for.plot",header=T)
-plot(normal,type="p",pch=20,col="gray",xlab="Fold change [log2(human_16/human_15)]",ylab="-Log10(FDR)",xlim=c(-5,5),ylim=c(0,4))
+plot(normal,type="p",pch=20,col="gray",xlab="Fold change [log2(human_CAG_hi/human_CAG_low)]",ylab="-Log10(FDR)",xlim=c(-5,5),ylim=c(0,4))
 points(up,pch=20,col="red")
 points(down,pch=20,col="blue")
 abline(h=-log10(0.05),col="green")
@@ -80,10 +92,11 @@ abline(v=-1,col="green")
 abline(v=1,col="green")
 ```
 
+
+
 ## GO enrichment
+### BP subontologies for all DEGs
 ```{r warning=FALSE, message = FALSE}
-#sapply(degs,mode)
-degs_ensemble_id = as.character(degs$gene_id)
 degs_gene_name = as.character(degs$gene)
 degs_enrich_go_bp = enrichGO(gene=degs_gene_name,
                              OrgDb="org.Hs.eg.db",
@@ -96,6 +109,21 @@ degs_enrich_go_bp = enrichGO(gene=degs_gene_name,
                              maxGSSize = 2000)
 dotplot(degs_enrich_go_bp, title="GO (BP) enrichment for DEGs",showCategory=10)
 ```
+
+### MF subontologies for all DEGs
+```{r warning=FALSE, message = FALSE}
+degs_enrich_go_mf = enrichGO(gene=degs_gene_name,
+                             OrgDb="org.Hs.eg.db",
+                             keyType = "SYMBOL",
+                             ont = "MF",
+                             pvalueCutoff  = 0.01,
+                             pAdjustMethod = "BH",
+                             qvalueCutoff = 0.05,
+                             minGSSize = 5, 
+                             maxGSSize = 2000)
+dotplot(degs_enrich_go_mf, title="GO (MF) enrichment for DEGs",showCategory=10)
+```
+
 ```{r warning=FALSE, message = FALSE, fig.width=10, fig.height=6}
 # GO enrichment for DEGs
 formula_res <- compareCluster(
@@ -116,9 +144,17 @@ lineage1_ego <- simplify(
   by="p.adjust",
   select_fun=min
 )
+
+```
+```{r}
+datatable(lineage1_ego@compareClusterResult,filter="top")
+```
+
+```{r warning=FALSE, message = FALSE, fig.width=10, fig.height=6}
 # Plot both analysis results
 dotplot(lineage1_ego, title="GO (BP) enrichment for up and down-regulated DEGs", showCategory=6)
 ```
+
 
 ## KEGG enrichment
 ```{r warning=FALSE, message = FALSE}
@@ -126,10 +162,11 @@ degs_gene_SYMBOL_to_UNIPROT = mapIds(org.Hs.eg.db, degs_gene_name, 'UNIPROT', 'S
 p <- enrichKEGG(unname(degs_gene_SYMBOL_to_UNIPROT),
            organism = "hsa",
            keyType = "uniprot",
-           pvalueCutoff  = 0.01,
-           pAdjustMethod = "BH",
-           qvalueCutoff = 0.05,
+           # pvalueCutoff  = 0.01,
+           # pAdjustMethod = "BH",
+           # qvalueCutoff = 0.05,
            minGSSize = 5,
            maxGSSize = 2000)#universe=all.genes,use_internal_data=F
 dotplot(p, title="KEGG enrichment for DEGs",showCategory=10)
 ```
+

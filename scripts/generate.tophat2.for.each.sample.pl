@@ -21,15 +21,18 @@ my $right_reads=join(",",@right_reads);
 my $mm10_Bowtie2Index="/home/zj76/project/database/mm10/mm10Bowtie2";
 my $mm10_gene_gtf="/home/zj76/project/database/mm10/Mus_musculus.GRCm38.96.gtf";
 
+print "module load Python/2.7.15-foss-2018b\n";
 print "module load SAMtools\n";
+#print "module load Bowtie2/2.2.8-foss-2016b\n";
 print "module load Bowtie2\n";
-print "module load Bowtie2/2.2.8-foss-2016b\n";
 print "module load TopHat\n";
-print "module load HTSeq\n";
+
 print "tophat2 -o $sampleID -p 10 --library-type fr-unstranded -G $mm10_gene_gtf $mm10_Bowtie2Index $left_reads $right_reads\n";
 my $bam = "$sampleID/accepted_hits.bam";
 my $sort_bam = "$sampleID/accepted_hits.sort.bam";
 print "samtools sort $bam >$sort_bam\n";
+
+print "module load HTSeq\n";
 print "htseq-count -f bam -t exon -q $sort_bam $mm10_gene_gtf >$sampleID/$sampleID.HTSeq.readcount\n";
 
 sub get_sample_reads{
